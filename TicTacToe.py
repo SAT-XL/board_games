@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
+import platform
 
 class TicTacToe:
     def __init__(self, master):
@@ -7,7 +8,7 @@ class TicTacToe:
         self.master.title("Tic Tac Toe")
         self.master.geometry("900x900")
         self.master.resizable(True, True)
-        self.master.config(bg="blue")
+        self.master.config(bg="white")  # Changed background to white
 
         self.current_player = "X"
         self.board = [""] * 9
@@ -20,8 +21,9 @@ class TicTacToe:
         for i in range(3):
             for j in range(3):
                 button = tk.Button(self.master, text="", font=("Helvetica", 100), width=4, height=2,
-                                   bg="red", fg="white", command=lambda row=i, col=j: self.on_click(row, col))
-                button.grid(row=i, column=j, sticky="nsew")
+                                   bg="white", fg="black", command=lambda row=i, col=j: self.on_click(row, col),
+                                   relief=tk.SOLID, borderwidth=1)  # Changed button color to white, added black border
+                button.grid(row=i, column=j, sticky="nsew", padx=1, pady=1)  # Added padding to show borders
                 self.buttons.append(button)
 
         # Configure grid to expand with window resizing
@@ -62,5 +64,9 @@ class TicTacToe:
 
 if __name__ == "__main__":
     root = tk.Tk()
+
+    if platform.system() == "Darwin":
+        root.tk.call("tk", "useinputmethods", False)
+
     game = TicTacToe(root)
     root.mainloop()
