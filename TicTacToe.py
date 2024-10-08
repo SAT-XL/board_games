@@ -64,9 +64,5 @@ class TicTacToe:
 
 if __name__ == "__main__":
     root = tk.Tk()
-
-    if platform.system() == "Darwin":
-        root.tk.call("tk", "useinputmethods", False)
-
     game = TicTacToe(root)
     root.mainloop()
