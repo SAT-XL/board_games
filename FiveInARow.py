@@ -78,10 +78,69 @@ class FiveInARow:
             self.current_player = 3 - self.current_player  # Switch between 1 and 2
 
     def computer_move(self):
-        empty_cells = [(r, c) for r in range(50) for c in range(50) if self.board[r][c] == 0]
-        if empty_cells:
-            row, col = random.choice(empty_cells)
+        best_move = self.find_best_move()
+        if best_move:
+            row, col = best_move
             self.make_move(row, col)
+        else:
+            empty_cells = [(r, c) for r in range(50) for c in range(50) if self.board[r][c] == 0]
+            if empty_cells:
+                row, col = random.choice(empty_cells)
+                self.make_move(row, col)
+
+    def find_best_move(self):
+        # Check for winning move
+        for row in range(50):
+            for col in range(50):
+                if self.board[row][col] == 0:
+                    self.board[row][col] = 2
+                    if self.check_winner(row, col):
+                        self.board[row][col] = 0
+                        return (row, col)
+                    self.board[row][col] = 0
+
+        # Check for blocking opponent's winning move
+        for row in range(50):
+            for col in range(50):
+                if self.board[row][col] == 0:
+                    self.board[row][col] = 1
+                    if self.check_winner(row, col):
+                        self.board[row][col] = 0
+                        return (row, col)
+                    self.board[row][col] = 0
+
+        # Find the move that creates the longest line for the computer
+        best_score = 0
+        best_move = None
+        for row in range(50):
+            for col in range(50):
+                if self.board[row][col] == 0:
+                    score = self.evaluate_move(row, col, 2)
+                    if score > best_score:
+                        best_score = score
+                        best_move = (row, col)
+
+        return best_move
+
+    def evaluate_move(self, row, col, player):
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        max_count = 0
+        for dr, dc in directions:
+            count = 1
+            for i in range(1, 5):
+                r, c = row + i*dr, col + i*dc
+                if 0 <= r < 50 and 0 <= c < 50 and self.board[r][c] == player:
+                    count += 1
+                else:
+                    break
+            for i in range(1, 5):
+                r, c = row - i*dr, col - i*dc
+                if 0 <= r < 50 and 0 <= c < 50 and self.board[r][c] == player:
+                    count += 1
+                else:
+                    break
+            max_count = max(max_count, count)
+        return max_count
 
     def check_winner(self, row, col):
         directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
