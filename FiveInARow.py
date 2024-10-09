@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox
+import random
 
 class FiveInARow:
     def __init__(self, master):
@@ -11,7 +12,31 @@ class FiveInARow:
 
         self.current_player = 1
         self.board = [[0 for _ in range(50)] for _ in range(50)]
+        self.play_with_computer = False
 
+        self.create_welcome_menu()
+
+    def create_welcome_menu(self):
+        self.welcome_frame = tk.Frame(self.master, bg="white")
+        self.welcome_frame.pack(expand=True)
+
+        title = tk.Label(self.welcome_frame, text="Welcome to Five In A Row", font=("Helvetica", 24), bg="white")
+        title.pack(pady=20)
+
+        play_with_player = tk.Button(self.welcome_frame, text="Play with Another Player", command=self.start_game_with_player)
+        play_with_player.pack(pady=10)
+
+        play_with_computer = tk.Button(self.welcome_frame, text="Play with Computer", command=self.start_game_with_computer)
+        play_with_computer.pack(pady=10)
+
+    def start_game_with_player(self):
+        self.play_with_computer = False
+        self.welcome_frame.destroy()
+        self.create_board()
+
+    def start_game_with_computer(self):
+        self.play_with_computer = True
+        self.welcome_frame.destroy()
         self.create_board()
 
     def create_board(self):
@@ -30,15 +55,28 @@ class FiveInARow:
         row = event.y // 20
 
         if self.board[row][col] == 0:
-            self.board[row][col] = self.current_player
-            color = "blue" if self.current_player == 1 else "red"
-            self.canvas.create_oval(col*20+2, row*20+2, (col+1)*20-2, (row+1)*20-2, fill=color, outline=color)
+            self.make_move(row, col)
 
-            if self.check_winner(row, col):
-                messagebox.showinfo("Game Over", f"Player {self.current_player} wins!")
-                self.reset_game()
-            else:
-                self.current_player = 3 - self.current_player  # Switch between 1 and 2
+            if self.play_with_computer and self.current_player == 2:
+                self.computer_move()
+
+    def make_move(self, row, col):
+        self.board[row][col] = self.current_player
+        color = "blue" if self.current_player == 1 else "red"
+        self.canvas.create_oval(col*20+2, row*20+2, (col+1)*20-2, (row+1)*20-2, fill=color, outline=color)
+
+        if self.check_winner(row, col):
+            winner = "Player 1" if self.current_player == 1 else ("Player 2" if not self.play_with_computer else "Computer")
+            messagebox.showinfo("Game Over", f"{winner} wins!")
+            self.reset_game()
+        else:
+            self.current_player = 3 - self.current_player  # Switch between 1 and 2
+
+    def computer_move(self):
+        empty_cells = [(r, c) for r in range(50) for c in range(50) if self.board[r][c] == 0]
+        if empty_cells:
+            row, col = random.choice(empty_cells)
+            self.make_move(row, col)
 
     def check_winner(self, row, col):
         directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
@@ -67,6 +105,7 @@ class FiveInARow:
         for i in range(51):
             self.canvas.create_line(i * 20, 0, i * 20, 1000, fill="gray")
             self.canvas.create_line(0, i * 20, 1000, i * 20, fill="gray")
+        self.create_welcome_menu()
 
 if __name__ == "__main__":
     root = tk.Tk()
