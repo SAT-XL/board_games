@@ -23,11 +23,11 @@ class FiveInARow:
         title = tk.Label(self.welcome_frame, text="Welcome to Five In A Row", font=("Helvetica", 24), bg="white")
         title.pack(pady=20)
 
-        play_with_player = tk.Button(self.welcome_frame, text="Play with Another Player", command=self.start_game_with_player)
-        play_with_player.pack(pady=10)
-
-        play_with_computer = tk.Button(self.welcome_frame, text="Play with Computer", command=self.start_game_with_computer)
+        play_with_computer = tk.Button(self.welcome_frame, text="1 Player", command=self.start_game_with_computer)
         play_with_computer.pack(pady=10)
+
+        play_with_player = tk.Button(self.welcome_frame, text="2 Players", command=self.start_game_with_player)
+        play_with_player.pack(pady=10)
 
     def start_game_with_player(self):
         self.play_with_computer = False
