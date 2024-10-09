@@ -13,6 +13,7 @@ class FiveInARow:
         self.current_player = 1
         self.board = [[0 for _ in range(50)] for _ in range(50)]
         self.play_with_computer = False
+        self.moves_count = 0  # Add a counter for moves
 
         self.create_welcome_menu()
 
@@ -64,10 +65,14 @@ class FiveInARow:
         self.board[row][col] = self.current_player
         color = "blue" if self.current_player == 1 else "red"
         self.canvas.create_oval(col*20+2, row*20+2, (col+1)*20-2, (row+1)*20-2, fill=color, outline=color)
+        self.moves_count += 1  # Increment the move counter
 
         if self.check_winner(row, col):
             winner = "Player 1" if self.current_player == 1 else ("Player 2" if not self.play_with_computer else "Computer")
             messagebox.showinfo("Game Over", f"{winner} wins!")
+            self.reset_game()
+        elif self.moves_count == 2500:  # Check for a tie (50x50 board)
+            messagebox.showinfo("Game Over", "It's a tie!")
             self.reset_game()
         else:
             self.current_player = 3 - self.current_player  # Switch between 1 and 2
@@ -101,6 +106,7 @@ class FiveInARow:
     def reset_game(self):
         self.current_player = 1
         self.board = [[0 for _ in range(50)] for _ in range(50)]
+        self.moves_count = 0  # Reset the move counter
         self.canvas.delete("all")
         for i in range(51):
             self.canvas.create_line(i * 20, 0, i * 20, 1000, fill="gray")
