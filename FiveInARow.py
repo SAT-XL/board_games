@@ -4,6 +4,10 @@ import random
 import numpy as np
 import pickle
 import time
+import tensorflow as tf
+from tensorflow import keras
+import xml.etree.ElementTree as ET
+import os
 
 class FiveInARow:
     def __init__(self, master):
@@ -19,23 +23,40 @@ class FiveInARow:
         self.moves_count = 0  # Add a counter for moves
         self.is_self_play = False  # Add a flag for self-play mode
 
-        self.q_table = {}
-        self.learning_rate = 0.1
-        self.discount_factor = 0.9
+        self.learning_rate = 0.001
+        self.discount_factor = 0.99
         self.epsilon = 0.1
-        self.load_q_table()
+        self.epsilon_decay = 0.995
+        self.epsilon_min = 0.01
+        self.batch_size = 32
+        self.memory = []
+        self.max_memory = 10000
+
+        self.model = self.build_model()
+        self.target_model = self.build_model()
+        self.update_target_model()
 
         self.developer_monitor = False
         self.games_played = 0
         self.dev_window = None
 
-        # Add counters for self-play statistics
-        self.self_play_count = 0
-        self.blue_wins = 0
-        self.red_wins = 0
-        self.ties = 0
+        # Load or initialize permanent data
+        self.permanent_data = self.load_permanent_data()
 
         self.create_welcome_menu()
+
+    def build_model(self):
+        model = keras.Sequential([
+            keras.layers.Dense(128, activation='relu', input_shape=(100,)),
+            keras.layers.Dense(128, activation='relu'),
+            keras.layers.Dense(100)
+        ])
+        model.compile(optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate),
+                      loss='mse')
+        return model
+
+    def update_target_model(self):
+        self.target_model.set_weights(self.model.get_weights())
 
     def create_welcome_menu(self):
         self.welcome_frame = tk.Frame(self.master, bg="white")
@@ -74,25 +95,28 @@ class FiveInARow:
             self.games_label = tk.Label(self.dev_window, text=f"Games played: {self.games_played}")
             self.games_label.pack(pady=10)
 
-            self.q_learning_label = tk.Label(self.dev_window, text=f"Q-table size: {len(self.q_table)}")
-            self.q_learning_label.pack(pady=10)
+            self.epsilon_label = tk.Label(self.dev_window, text=f"Epsilon: {self.epsilon:.4f}")
+            self.epsilon_label.pack(pady=10)
 
             self.self_play_label = tk.Label(self.dev_window, text=self.get_self_play_stats())
             self.self_play_label.pack(pady=10)
 
     def get_self_play_stats(self):
-        total = self.self_play_count
+        total = self.permanent_data['self_play']['total_games']
         if total == 0:
             return "No self-play games yet"
-        blue_ratio = (self.blue_wins / total) * 100 if total > 0 else 0
-        red_ratio = (self.red_wins / total) * 100 if total > 0 else 0
-        tie_ratio = (self.ties / total) * 100 if total > 0 else 0
-        return f"self-play: {total}, blue wins: {self.blue_wins}({blue_ratio:.1f}%), red wins: {self.red_wins}({red_ratio:.1f}%), ties: {self.ties}({tie_ratio:.1f}%)"
+        blue_wins = self.permanent_data['self_play']['blue_wins']
+        red_wins = self.permanent_data['self_play']['red_wins']
+        ties = self.permanent_data['self_play']['ties']
+        blue_ratio = (blue_wins / total) * 100 if total > 0 else 0
+        red_ratio = (red_wins / total) * 100 if total > 0 else 0
+        tie_ratio = (ties / total) * 100 if total > 0 else 0
+        return f"self-play: {total}, blue wins: {blue_wins}({blue_ratio:.1f}%), red wins: {red_wins}({red_ratio:.1f}%), ties: {ties}({tie_ratio:.1f}%)"
 
     def update_dev_window(self):
         if self.developer_monitor and self.dev_window:
             self.games_label.config(text=f"Games played: {self.games_played}")
-            self.q_learning_label.config(text=f"Q-table size: {len(self.q_table)}")
+            self.epsilon_label.config(text=f"Epsilon: {self.epsilon:.4f}")
             self.self_play_label.config(text=self.get_self_play_stats())
 
     def start_game_with_player(self):
@@ -144,15 +168,26 @@ class FiveInARow:
             winner = "Blue" if self.current_player == 1 else "Red"
             if self.is_self_play:
                 if winner == "Blue":
-                    self.blue_wins += 1
+                    self.permanent_data['self_play']['blue_wins'] += 1
                 else:
-                    self.red_wins += 1
+                    self.permanent_data['self_play']['red_wins'] += 1
+                self.permanent_data['self_play']['total_games'] += 1
+            elif self.play_with_computer:
+                if winner == "Blue":
+                    self.permanent_data['one_player']['player_wins'] += 1
+                else:
+                    self.permanent_data['one_player']['computer_wins'] += 1
+                self.permanent_data['one_player']['total_games'] += 1
             else:
                 messagebox.showinfo("Game Over", f"{winner} wins!")
             self.reset_game()
         elif self.moves_count == 100:  # Check for a tie (10x10 board)
             if self.is_self_play:
-                self.ties += 1
+                self.permanent_data['self_play']['ties'] += 1
+                self.permanent_data['self_play']['total_games'] += 1
+            elif self.play_with_computer:
+                self.permanent_data['one_player']['ties'] += 1
+                self.permanent_data['one_player']['total_games'] += 1
             else:
                 messagebox.showinfo("Game Over", "It's a tie!")
             self.reset_game()
@@ -162,69 +197,62 @@ class FiveInARow:
     def computer_move(self):
         state = self.get_state()
         if random.random() < self.epsilon:
-            empty_cells = [(r, c) for r in range(10) for c in range(10) if self.board[r][c] == 0]  # Changed to 10x10
+            empty_cells = [(r, c) for r in range(10) for c in range(10) if self.board[r][c] == 0]
             action = random.choice(empty_cells) if empty_cells else None
         else:
-            action = self.get_best_action(state)
+            q_values = self.model.predict(np.array([state]))[0]
+            valid_actions = [(r, c) for r in range(10) for c in range(10) if self.board[r][c] == 0]
+            action = max(valid_actions, key=lambda a: q_values[a[0]*10 + a[1]])
         
         if action:
             row, col = action
             self.make_move(row, col)
             new_state = self.get_state()
             reward = self.get_reward(new_state)
-            self.update_q_table(state, action, reward, new_state)
+            self.remember(state, action, reward, new_state, self.check_winner(row, col) or self.moves_count == 100)
+            self.replay()
 
     def get_state(self):
-        return tuple(tuple(row) for row in self.board)
-
-    def get_best_action(self, state):
-        best_action = None
-        best_value = float('-inf')
-        for row in range(10):  # Changed to 10x10
-            for col in range(10):  # Changed to 10x10
-                if self.board[row][col] == 0:
-                    action = (row, col)
-                    value = self.q_table.get((state, action), 0)
-                    if value > best_value:
-                        best_value = value
-                        best_action = action
-        return best_action
+        return np.array(self.board).flatten()
 
     def get_reward(self, state):
-        if self.check_winner_state(state, 2):  # Computer wins
+        if self.check_winner_state(state.reshape((10, 10)), 2):  # Computer wins
             return 1
-        elif self.check_winner_state(state, 1):  # Player wins
+        elif self.check_winner_state(state.reshape((10, 10)), 1):  # Player wins
             return -1
-        elif all(self.board[r][c] != 0 for r in range(10) for c in range(10)):  # Draw
+        elif np.all(state != 0):  # Draw
             return 0.5
         else:
             return 0
 
     def check_winner_state(self, state, player):
-        for row in range(10):  # Changed to 10x10
-            for col in range(10):  # Changed to 10x10
+        for row in range(10):
+            for col in range(10):
                 if state[row][col] == player:
                     if self.check_winner(row, col, state):
                         return True
         return False
 
-    def update_q_table(self, state, action, reward, new_state):
-        old_value = self.q_table.get((state, action), 0)
-        next_max = max([self.q_table.get((new_state, (r, c)), 0) for r in range(10) for c in range(10) if self.board[r][c] == 0], default=0)  # Changed to 10x10
-        new_value = (1 - self.learning_rate) * old_value + self.learning_rate * (reward + self.discount_factor * next_max)
-        self.q_table[(state, action)] = new_value
-        self.update_dev_window()
+    def remember(self, state, action, reward, next_state, done):
+        self.memory.append((state, action, reward, next_state, done))
+        if len(self.memory) > self.max_memory:
+            self.memory.pop(0)
 
-    def load_q_table(self):
-        try:
-            with open('q_table.pkl', 'rb') as f:
-                self.q_table = pickle.load(f)
-        except FileNotFoundError:
-            self.q_table = {}
+    def replay(self):
+        if len(self.memory) < self.batch_size:
+            return
 
-    def save_q_table(self):
-        with open('q_table.pkl', 'wb') as f:
-            pickle.dump(self.q_table, f)
+        minibatch = random.sample(self.memory, self.batch_size)
+        for state, action, reward, next_state, done in minibatch:
+            target = reward
+            if not done:
+                target = reward + self.discount_factor * np.amax(self.target_model.predict(np.array([next_state]))[0])
+            target_f = self.model.predict(np.array([state]))
+            target_f[0][action[0]*10 + action[1]] = target
+            self.model.fit(np.array([state]), target_f, epochs=1, verbose=0)
+        
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
 
     def reset_game(self):
         self.current_player = 1
@@ -236,10 +264,13 @@ class FiveInARow:
             self.canvas.create_line(0, i * 40, 400, i * 40, fill="gray")  # Adjusted spacing
         if self.play_with_computer and not self.is_self_play:
             self.games_played += 1
+        if self.is_self_play:
+            self.games_played += 1  # Increment games_played only once for self-play
         if not self.is_self_play:
             self.create_welcome_menu()
-        self.save_q_table()
+        self.update_target_model()
         self.update_dev_window()
+        self.save_permanent_data()
 
     def check_winner(self, row, col, state=None):
         if state is None:
@@ -264,17 +295,18 @@ class FiveInARow:
         return False
 
     def self_play(self):
-        num_games = 10000  # Number of self-play games
+        num_games = 20  # Number of self-play games
         for game in range(num_games):
             self.reset_game()
-            self.self_play_count += 1  # Increment self-play count here, once per game
             while True:
                 state = self.get_state()
                 if random.random() < self.epsilon:
                     empty_cells = [(r, c) for r in range(10) for c in range(10) if self.board[r][c] == 0]
                     action = random.choice(empty_cells) if empty_cells else None
                 else:
-                    action = self.get_best_action(state)
+                    q_values = self.model.predict(np.array([state]))[0]
+                    valid_actions = [(r, c) for r in range(10) for c in range(10) if self.board[r][c] == 0]
+                    action = max(valid_actions, key=lambda a: q_values[a[0]*10 + a[1]])
                 
                 if action:
                     row, col = action
@@ -284,26 +316,28 @@ class FiveInARow:
 
                     new_state = self.get_state()
                     reward = self.get_reward(new_state)
-                    self.update_q_table(state, action, reward, new_state)
+                    done = self.check_winner(row, col) or self.moves_count == 100
+                    self.remember(state, action, reward, new_state, done)
+                    self.replay()
                     
-                    if self.check_winner(row, col) or self.moves_count == 100:
+                    if done:
                         self.update_board()
                         self.master.update()
                         break
                 else:
                     break
 
-            self.games_played += 1
             self.update_dev_window()
             self.master.update()  # Update the GUI
 
             if game % 100 == 0:
                 print(f"Completed {game} self-play games")
-                self.save_q_table()
+                self.model.save('dqn_model.h5')
 
         print("Self-play training completed")
-        self.save_q_table()
+        self.model.save('dqn_model.h5')
         self.is_self_play = False  # Reset this after self-play is done
+        self.save_permanent_data()
 
     def update_board(self):
         self.canvas.delete("all")
@@ -316,6 +350,49 @@ class FiveInARow:
                     self.canvas.create_oval(col*40+2, row*40+2, (col+1)*40-2, (row+1)*40-2, fill="blue", outline="blue")
                 elif self.board[row][col] == 2:
                     self.canvas.create_oval(col*40+2, row*40+2, (col+1)*40-2, (row+1)*40-2, fill="red", outline="red")
+
+    def load_permanent_data(self):
+        if os.path.exists('permanent_data.xml'):
+            tree = ET.parse('permanent_data.xml')
+            root = tree.getroot()
+            data = {
+                'self_play': {
+                    'total_games': int(root.find('self_play/total_games').text),
+                    'blue_wins': int(root.find('self_play/blue_wins').text),
+                    'red_wins': int(root.find('self_play/red_wins').text),
+                    'ties': int(root.find('self_play/ties').text)
+                },
+                'one_player': {
+                    'total_games': int(root.find('one_player/total_games').text),
+                    'player_wins': int(root.find('one_player/player_wins').text),
+                    'computer_wins': int(root.find('one_player/computer_wins').text),
+                    'ties': int(root.find('one_player/ties').text)
+                }
+            }
+        else:
+            data = {
+                'self_play': {'total_games': 0, 'blue_wins': 0, 'red_wins': 0, 'ties': 0},
+                'one_player': {'total_games': 0, 'player_wins': 0, 'computer_wins': 0, 'ties': 0}
+            }
+        return data
+
+    def save_permanent_data(self):
+        root = ET.Element('data')
+        
+        self_play = ET.SubElement(root, 'self_play')
+        ET.SubElement(self_play, 'total_games').text = str(self.permanent_data['self_play']['total_games'])
+        ET.SubElement(self_play, 'blue_wins').text = str(self.permanent_data['self_play']['blue_wins'])
+        ET.SubElement(self_play, 'red_wins').text = str(self.permanent_data['self_play']['red_wins'])
+        ET.SubElement(self_play, 'ties').text = str(self.permanent_data['self_play']['ties'])
+        
+        one_player = ET.SubElement(root, 'one_player')
+        ET.SubElement(one_player, 'total_games').text = str(self.permanent_data['one_player']['total_games'])
+        ET.SubElement(one_player, 'player_wins').text = str(self.permanent_data['one_player']['player_wins'])
+        ET.SubElement(one_player, 'computer_wins').text = str(self.permanent_data['one_player']['computer_wins'])
+        ET.SubElement(one_player, 'ties').text = str(self.permanent_data['one_player']['ties'])
+        
+        tree = ET.ElementTree(root)
+        tree.write('permanent_data.xml')
 
 if __name__ == "__main__":
     root = tk.Tk()
